@@ -8,14 +8,17 @@ jobs:
   renew:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # 【修改点】：将代理变量提升到 Job 级别的 env 中
+    env:
+      GOST_PROXY: ${{ secrets.GOST_PROXY }}
+      
     steps:
       - name: 📥 检出代码
         uses: actions/checkout@v4
 
       - name: 🛡️ 启动 GOST 代理
-        if: ${{ secrets.GOST_PROXY != '' }}
-        env:
-          GOST_PROXY: ${{ secrets.GOST_PROXY }}
+        # 【修改点】：直接判断 env 中的变量
+        if: env.GOST_PROXY != ''
         run: |
           VERSION=$(curl -s https://api.github.com/repos/ginuerzh/gost/releases/latest | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v')
           wget -q "https://github.com/ginuerzh/gost/releases/download/v${VERSION}/gost_${VERSION}_linux_amd64.tar.gz"
@@ -28,7 +31,5 @@ jobs:
       - name: 🔧 执行多账号续期
         env:
           ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
-          GOST_PROXY: ${{ secrets.GOST_PROXY }}
-          # 全局备用 TG 通知（如果账号内没配置则用这个）
           GLOBAL_TG_BOT: ${{ secrets.TG_BOT }}
         run: bash mephia_renew.sh
