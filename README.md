@@ -46,6 +46,7 @@
     "session": "z0y9x8w7v6u5t4s3r2q1..."
   }
 ]
+
 字段详解：
     name: 账号别名（用于通知时区分是谁）。
     token: 你的 Discord Authorization Token。
@@ -80,4 +81,7 @@
     频率建议：Discord 对 Slash Command 有频率检测，本项目预设的 5 天执行间隔是经过测试的安全频率。
     免责声明：本工具仅供技术研究使用，请遵守 Discord 服务条款 及 Mephia 相关规定。开发者不承担因滥用导致的账号封禁风险。
 建议： 在保存 ACCOUNTS_JSON 时，请务必检查 JSON 格式的合法性（例如双引号的使用以及括号的闭合），以免脚本解析失败。
+
+🙏 致谢
+特别感谢原项目 losy-mify/Mephia-Renew 提供的灵感与基础代码支持！
 
