@@ -1,119 +1,107 @@
 #!/bin/bash
-# ===== 个人配置（通过 GitHub Secrets 注入）=====
-: "${DISCORD_TOKEN:?请设置 GitHub Secret: DISCORD_TOKEN}"
-: "${SESSION_ID:?请设置 GitHub Secret: SESSION_ID}"
 
-# ===== 公共配置 =====
+# 检查依赖
+if ! command -v jq &> /dev/null; then
+    echo "⚙️ 正在安装 jq..."
+    sudo apt-get update && sudo apt-get install -y jq
+fi
+
+# 基础配置
 GUILD_ID="1280090779766886437"
 CHANNEL_ID="1312458506976235621"
-
-# ===== 硬编码的指令信息 =====
 COMMAND_ID="1482292602907922555"
 APPLICATION_ID="1475048292449648650"
 VERSION="1482292603159449629"
 
-# ===== 代理配置 =====
+# 代理设置
+PROXY=""
 if [ -n "$GOST_PROXY" ]; then
-  PROXY="-x http://127.0.0.1:8080"
-  echo "🛡️ 使用代理模式"
-else
-  PROXY=""
-  echo "🌐 直连模式"
+    PROXY="-x http://127.0.0.1:8080"
+    echo "🛡️ 代理模式已开启"
 fi
 
-echo "🕐 运行时间: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "🔧 Mephia 续期任务"
-echo "========================================"
-echo "📌 COMMAND_ID:     $COMMAND_ID"
-echo "🤖 APPLICATION_ID: $APPLICATION_ID"
+# 解析账号数量
+COUNT=$(echo "$ACCOUNTS_JSON" | jq '. | length')
+echo "👥 检测到 $COUNT 个账号待处理"
+echo "----------------------------------------"
 
-# ===== 生成 nonce =====
-NONCE=$(python3 -c "import time; print(str(int((int(time.time()*1000) - 1420070400000) << 22)))")
+for ((i=0; i<$COUNT; i++)); do
+    # 提取当前账号信息
+    ACC_NAME=$(echo "$ACCOUNTS_JSON" | jq -r ".[$i].name // \"账号$(($i+1))\"")
+    ACC_TOKEN=$(echo "$ACCOUNTS_JSON" | jq -r ".[$i].token")
+    ACC_SESSION=$(echo "$ACCOUNTS_JSON" | jq -r ".[$i].session")
+    ACC_TG=$(echo "$ACCOUNTS_JSON" | jq -r ".[$i].tg_bot // \"$GLOBAL_TG_BOT\"")
 
-# ===== 构造 payload =====
-PAYLOAD=$(cat <<EOF
-{
-  "type": 2,
-  "application_id": "${APPLICATION_ID}",
-  "guild_id": "${GUILD_ID}",
-  "channel_id": "${CHANNEL_ID}",
-  "session_id": "${SESSION_ID}",
-  "nonce": "${NONCE}",
-  "analytics_location": "slash_ui",
-  "data": {
-    "version": "${VERSION}",
-    "id": "${COMMAND_ID}",
-    "guild_id": "${GUILD_ID}",
-    "name": "renew",
-    "type": 1,
-    "options": [],
-    "application_command": {
-      "id": "${COMMAND_ID}",
-      "type": 1,
-      "application_id": "${APPLICATION_ID}",
-      "guild_id": "${GUILD_ID}",
-      "version": "${VERSION}",
-      "name": "renew",
-      "description": "Renouveler votre serveur gratuit",
-      "integration_types": [0],
-      "options": []
-    },
-    "attachments": []
-  }
-}
-EOF
-)
+    echo "▶️ 正在处理 [$ACC_NAME]..."
 
-# ===== 发送 slash command 交互 =====
-echo "🚀 正在发送 /renew ..."
-RESPONSE=$(curl -s -w "\n%{http_code}" $PROXY \
-  -X POST "https://discord.com/api/v9/interactions" \
-  -H "authorization: ${DISCORD_TOKEN}" \
-  -H "content-type: application/json" \
-  -H "user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" \
-  -H "x-discord-locale: zh-CN" \
-  -H "x-discord-timezone: Asia/Shanghai" \
-  -H "origin: https://discord.com" \
-  -H "referer: https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}" \
-  -d "${PAYLOAD}")
+    # 生成 Discord Nonce
+    NONCE=$(python3 -c "import time; print(str(int((int(time.time()*1000) - 1420070400000) << 22)))")
 
-HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-BODY=$(echo "$RESPONSE" | head -n-1)
+    # 构造 Payload
+    PAYLOAD=$(jq -n \
+        --arg app_id "$APPLICATION_ID" \
+        --arg g_id "$GUILD_ID" \
+        --arg c_id "$CHANNEL_ID" \
+        --arg s_id "$ACC_SESSION" \
+        --arg nonce "$NONCE" \
+        --arg ver "$VERSION" \
+        --arg cmd_id "$COMMAND_ID" \
+        '{
+            type: 2, application_id: $app_id, guild_id: $g_id, channel_id: $c_id, 
+            session_id: $s_id, nonce: $nonce, analytics_location: "slash_ui",
+            data: {
+                version: $ver, id: $cmd_id, guild_id: $g_id, name: "renew", type: 1,
+                options: [],
+                application_command: {
+                    id: $cmd_id, type: 1, application_id: $app_id, guild_id: $g_id, 
+                    version: $ver, name: "renew", description: "Renouveler votre serveur gratuit"
+                }
+            }
+        }')
 
-if [ "$HTTP_CODE" = "204" ]; then
-  echo "✅ 成功！状态码: 204"
-  echo "🎉 /renew 指令已成功发送！"
-  RESULT="✅ 续期成功！"
-else
-  echo "❌ 失败！状态码: ${HTTP_CODE}"
-  echo "   响应: ${BODY}"
-  case "$HTTP_CODE" in
-    429) RESULT="❌ 失败！触发频率限制（rate limit）" ;;
-    401) RESULT="❌ 失败！Token 失效，需要重新获取" ;;
-    403) RESULT="❌ 失败！无权限" ;;
-    *)   RESULT="❌ 失败！状态码: ${HTTP_CODE}" ;;
-  esac
-fi
+    # 发送请求
+    RESPONSE=$(curl -s -w "\n%{http_code}" $PROXY \
+        -X POST "https://discord.com/api/v9/interactions" \
+        -H "authorization: ${ACC_TOKEN}" \
+        -H "content-type: application/json" \
+        -H "user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+        -d "$PAYLOAD")
 
-# ===== TG 通知 =====
-if [ -n "$TG_BOT" ]; then
-  TG_CHAT_ID=$(echo "$TG_BOT" | cut -d',' -f1)
-  TG_TOKEN=$(echo "$TG_BOT" | cut -d',' -f2)
-  RUN_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+    BODY=$(echo "$RESPONSE" | head -n-1)
 
-  MESSAGE="🔧 Mephia 续期任务
-🕐 运行时间: ${RUN_TIME}
-📊 续期结果: ${RESULT}"
+    # 结果判定
+    if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
+        RESULT="✅ 续期成功"
+        DETAIL="指令已成功送达 Discord"
+    else
+        RESULT="❌ 续期失败"
+        # 提取 Discord 返回的具体错误原因，如果没有则显示状态码
+        ERROR_MSG=$(echo "$BODY" | jq -r '.message // empty')
+        [ -z "$ERROR_MSG" ] && DETAIL="HTTP 状态码: $HTTP_CODE" || DETAIL="原因: $ERROR_MSG"
+    fi
 
-  curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-    -d chat_id="${TG_CHAT_ID}" \
-    -d text="${MESSAGE}" > /dev/null
-  echo "📬 TG 通知已发送"
-fi
+    echo "  结果: $RESULT ($DETAIL)"
 
-# ===== 最终退出码 =====
-if [[ "$RESULT" == ✅* ]]; then
-  exit 0
-else
-  exit 1
-fi
+    # 发送 TG 通知
+    if [ -n "$ACC_TG" ] && [ "$ACC_TG" != "null" ]; then
+        TG_CHAT_ID=$(echo "$ACC_TG" | cut -d',' -f1)
+        TG_TOKEN=$(echo "$ACC_TG" | cut -d',' -f2)
+        
+        MSG="🔔 *Mephia 续期通知*
+👤 账号: ${ACC_NAME}
+📊 结果: ${RESULT}
+📝 详情: ${DETAIL}
+⏰ 时间: $(date '+%Y-%m-%d %H:%M:%S')"
+
+        curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT_ID}" \
+            -d text="${MSG}" \
+            -d parse_mode="Markdown" > /dev/null
+    fi
+    
+    echo "----------------------------------------"
+    sleep 2 # 账号间微小延迟，防止触发 API 滥用检测
+done
+
+echo "🏁 所有任务执行完毕"
